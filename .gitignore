@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+env/
+.env
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+npm-debug.log
+
+# Authentication & Secrets
+token.pickle
+backend/token.pickle
+credentials.json
+*.pem
+.env.*
+
+# OS
+.DS_Store

@@ -1,0 +1,34 @@
+# Server
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+
+# Async HTTP + WebSocket
+httpx==0.27.2
+websockets==13.1
+
+# Gemini Live API
+google-generativeai==0.8.3
+google-genai==0.6.0
+
+# LangGraph + LangChain
+langgraph==0.2.56
+langchain-core==0.3.20
+langchain-google-genai==2.0.7
+
+# Google Calendar OAuth
+google-auth==2.35.0
+google-auth-oauthlib==1.2.1
+google-api-python-client==2.149.0
+
+# Config
+pydantic-settings==2.5.2
+
+# Date arithmetic (M1)
+python-dateutil==2.9.0
+
+# LangSmith tracing (activated via env vars only — no instrumentation code)
+langsmith==0.1.143
+
+# Testing
+pytest==8.3.3
+pytest-asyncio==0.24.0
