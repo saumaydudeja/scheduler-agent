@@ -1,0 +1,47 @@
+:root {
+  --bg-primary: 240 10% 4%;
+  --bg-secondary: 240 5% 8%;
+  --accent: 250 85% 65%;
+  --accent-hover: 250 85% 75%;
+  
+  --text-primary: 0 0% 98%;
+  --text-secondary: 240 5% 65%;
+  
+  --glass-bg: rgba(20, 20, 30, 0.4);
+  --glass-border: rgba(255, 255, 255, 0.05);
+  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+  
+  --transition-normal: 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 0.15s ease-out;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: hsl(var(--bg-primary));
+  color: hsl(var(--text-primary));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* Shared keyframes for the application */
+@keyframes pulseGlow {
+  0% { box-shadow: 0 0 0 0 hsla(var(--accent), 0.4); }
+  70% { box-shadow: 0 0 0 20px hsla(var(--accent), 0); }
+  100% { box-shadow: 0 0 0 0 hsla(var(--accent), 0); }
+}
+
+@keyframes spinGradient {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

@@ -1,0 +1,73 @@
+.card {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  max-width: 480px;
+  margin-top: 16px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: var(--glass-shadow);
+  animation: popIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.icon {
+  font-size: 26px;
+}
+
+.header h3 {
+  margin: 0;
+  color: hsl(var(--text-primary));
+  font-weight: 600;
+  font-size: 20px;
+}
+
+.body {
+  color: hsl(var(--text-secondary));
+  font-size: 15px;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.body p {
+  margin: 8px 0;
+}
+
+.body strong {
+  color: hsl(var(--text-primary));
+  font-weight: 500;
+}
+
+.btn {
+  display: block;
+  text-align: center;
+  width: 100%;
+  padding: 14px;
+  background: hsla(var(--accent), 0.5);
+  color: hsl(var(--text-primary));
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 15px;
+  border-radius: 10px;
+  border: 1px solid hsla(var(--accent), 0.8);
+  transition: all var(--transition-fast);
+}
+
+.btn:hover {
+  background: hsla(var(--accent-hover), 0.6);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px hsla(var(--accent), 0.3);
+}
+
+@keyframes popIn {
+  from { opacity: 0; transform: scale(0.95) translateY(15px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}

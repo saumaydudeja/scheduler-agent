@@ -1,0 +1,40 @@
+.main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 60px 24px;
+  max-width: 800px;
+  margin: 0 auto;
+  min-height: 100vh;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.header h1 {
+  font-size: 44px;
+  font-weight: 700;
+  margin: 0 0 12px 0;
+  background: linear-gradient(135deg, hsl(var(--text-primary)), hsl(var(--accent)));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: fadeIn var(--transition-normal);
+  letter-spacing: -0.5px;
+}
+
+.header p {
+  font-size: 16px;
+  color: hsl(var(--text-secondary));
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+
+.voiceControls {
+  margin: 40px 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 140px;
+}
