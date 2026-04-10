@@ -41,7 +41,7 @@ TOOLS = [
     },
     {
         "name": "resume_conflict_resolution",
-        "description": "Re-executes M3 securely if the user verbally rejects or pivots away from an alternative slot M3 just suggested. It resumes execution traversing down the Retry Ladder. USE THIS TOOL ONLY TO RESUME THE WORK STARTED BY M3 - invoke_conflict_resolution.",
+        "description": "USE THIS TOOL ONLY AFTER THE invoke_conflict_resolution has been called. Continues the execution of invoke_conflict_resolution (M3) after the user responds to the clarification/suggestion that M3 suggested. It resumes execution traversing down the Retry Ladder. USE THIS TOOL ONLY TO RESUME THE WORK STARTED BY M3 - invoke_conflict_resolution.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -53,7 +53,7 @@ TOOLS = [
     },
     {
         "name": "create_calendar_event",
-        "description": "CONFIRMATION COMPONENT. Fires the final calendar booking transaction against Google Calendar. Call this STRICTLY ONLY after the user explicitly accepts a specific date and time mapping.",
+        "description": "CONFIRMATION COMPONENT. Fires the final calendar booking transaction against Google Calendar. Call this STRICTLY ONLY after the user explicitly accepts a specific date and time mapping. Call the update memory_tool after this tool succeeds.",
         "parameters": {
             "type": "object",
             "properties": {
