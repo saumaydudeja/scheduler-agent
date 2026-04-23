@@ -6,12 +6,23 @@ from modules.slot_search import run_slot_search
 from modules.conflict_resolution import run_conflict_resolution
 from tools.calendar import create_event
 from memory.store import load_memory, update_memory
+import time
+import structlog
+import utils.trace as trace
+
+logger = structlog.get_logger()
 
 DEFAULT_USER_ID = "default_user_1"
 
 async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[str, Any]:
     """Routes a tool call from Gemini to the correct backend module."""
-    print(f"\n[DISPATCHER] -> Executing Tool: {name} | Args: {args}")
+    log = logger.bind(session_id=thread_id)
+    # Slim args for the banner — drop thread_id, it's noise
+    banner_args = {k: v for k, v in args.items() if k != "thread_id"}
+    trace.tool_start(name, banner_args)
+    start = time.perf_counter()
+    
+    result = None
     
     if name == "resolve_time_expression":
         await emit_status(thread_id, "Understanding your request...", "time_resolution", "start")
@@ -19,7 +30,6 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
         user_prefs = load_memory(DEFAULT_USER_ID)
         result = await run_time_resolution(
             raw_expression=args.get("raw_expression", ""),
-            duration_hint=args.get("duration_hint"),
             additional_constraints=args.get("additional_constraints", ""),
             user_preferences=user_prefs
         )
@@ -29,8 +39,6 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
             del result["resolved_window"]
             
         await emit_status(thread_id, "Finished analyzing time context.", "time_resolution", "end")
-        print(f"[DISPATCHER] <- Returning {name}: {result}")
-        return result
 
     elif name == "search_slots":
         await emit_status(thread_id, "Checking your calendar...", "slot_search", "normalize_input")
@@ -48,15 +56,12 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
                 del result[k]
                 
         await emit_status(thread_id, "Finished calendar search.", "slot_search", "end")
-        print(f"[DISPATCHER] <- Returning {name}: {result}")
-        return result
 
     elif name == "invoke_conflict_resolution":
         await emit_status(thread_id, "Looking for alternatives...", "conflict_resolution", "determine_next_window")
         
         result = await run_conflict_resolution(
             situation_summary=args.get("situation_summary", ""),
-            duration_minutes=args.get("duration_minutes", 30),
             thread_id=thread_id
         )
         
@@ -67,9 +72,6 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
             
         if result.get("status") == "needs_user_input":
             await emit_status(thread_id, "Waiting for your preference...", "conflict_resolution", "suggest_to_user")
-            
-        print(f"[DISPATCHER] <- Returning {name}: {result}")
-        return result
 
     elif name == "resume_conflict_resolution":
         await emit_status(thread_id, "Continuing search...", "conflict_resolution", "resume")
@@ -77,7 +79,6 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
         # On resume, only thread_id and resume_with strictly matter since it loads from checkpoint
         result = await run_conflict_resolution(
             situation_summary="",
-            duration_minutes=30,
             thread_id=thread_id,
             resume_with=args.get("situation_summary", "")
         )
@@ -89,9 +90,6 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
             
         if result.get("status") == "needs_user_input":
             await emit_status(thread_id, "Waiting for your preference...", "conflict_resolution", "suggest_to_user")
-            
-        print(f"[DISPATCHER] <- Returning {name}: {result}")
-        return result
 
     elif name == "create_calendar_event":
         await emit_status(thread_id, "Booking your meeting...", "dispatcher", "create_calendar_event")
@@ -112,9 +110,7 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
             calendar_link=result.get("html_link")
         )
         
-        final_res = {"status": "success", "event_id": result.get("id"), "html_link": result.get("html_link")}
-        print(f"[DISPATCHER] <- Returning {name}: {final_res}")
-        return final_res
+        result = {"status": "success", "event_id": result.get("id"), "html_link": result.get("html_link")}
 
     elif name == "update_memory":
         await emit_status(thread_id, "Updating preferences...", "dispatcher", "update_memory")
@@ -125,8 +121,16 @@ async def execute_tool(name: str, args: dict[str, Any], thread_id: str) -> dict[
             booked_event=args.get("booked_event")
         )
         
-        print(f"[DISPATCHER] <- Returning {name}: success")
-        return {"status": "success"}
+        result = {"status": "success"}
 
     else:
-        return {"error": f"Unknown tool: {name}"}
+        result = {"error": f"Unknown tool: {name}"}
+
+    elapsed = (time.perf_counter() - start) * 1000
+    # Build a slim summary of the most important result keys for the tool_end banner
+    summary_keys = ["status", "search_succeeded", "natural_language_result",
+                    "natural_language_summary", "message_to_speak", "conflict_attempts",
+                    "escalation_needed", "event_id"]
+    summary = {k: result[k] for k in summary_keys if k in result}
+    trace.tool_end(name, elapsed, summary)
+    return result

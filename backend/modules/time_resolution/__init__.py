@@ -6,14 +6,12 @@ from agent_types import TimeResolutionState
 
 async def run_time_resolution(
     raw_expression: str,
-    duration_hint: Optional[int],
     additional_constraints: str,
     user_preferences: dict,
 ) -> dict:
     graph = build_time_resolution_graph()
     initial_state: TimeResolutionState = {
         "raw_expression": raw_expression,
-        "duration_hint": duration_hint,
         "additional_constraints": additional_constraints,
         "user_preferences": user_preferences,
         # initialize computed fields

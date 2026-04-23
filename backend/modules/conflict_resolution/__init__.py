@@ -17,7 +17,6 @@ def _get_graph():
 
 async def run_conflict_resolution(
     situation_summary: str,
-    duration_minutes: int,
     thread_id: str,
     resume_with: Optional[str] = None,
 ) -> dict:
@@ -32,7 +31,6 @@ async def run_conflict_resolution(
         result = await graph.ainvoke(
             {
                 "situation_summary": situation_summary,
-                "duration_minutes": duration_minutes,
                 "thread_id": thread_id,
                 "conflict_attempts": 0,
                 "tried_windows": [],

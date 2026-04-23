@@ -20,6 +20,11 @@ from pydantic import BaseModel
 from agent_types import SlotSearchState
 from config import settings
 import tools.calendar as calendar
+import structlog
+from utils.telemetry import track_latency
+import utils.trace as trace
+
+logger = structlog.get_logger()
 
 
 # ---------------------------------------------------------------------------
@@ -41,11 +46,16 @@ Parse the given description into a search window. Set date_start and date_end as
 # Node: normalize_input
 # ---------------------------------------------------------------------------
 
+@track_latency
 async def normalize_input(state: SlotSearchState) -> dict:
+    log = logger.bind(module="slot_search")
     # M3 path — structured_window already parsed, skip LLM
     if state.get("structured_window") is not None:
+        trace.node_enter("normalize_input", inputs={"source": "[structured window from M3]"})
+        trace.node_exit("normalize_input", outputs={"normalized_window": state["structured_window"]})
         return {"normalized_window": state["structured_window"]}
 
+    trace.node_enter("normalize_input", inputs={"raw_slot_description": state.get("raw_slot_description")})
     # Gemini path — parse raw NL into a structured window
     user_tz = ZoneInfo(settings.user_timezone)
     now = datetime.now(user_tz)
@@ -69,6 +79,10 @@ async def normalize_input(state: SlotSearchState) -> dict:
         HumanMessage(content=state["raw_slot_description"]),
     ])
 
+    trace.node_exit("normalize_input",
+        outputs={"date_start": result.date_start, "date_end": result.date_end,
+                 "hours": f"{result.preferred_start_hour}h–{result.preferred_end_hour}h"}
+    )
     return {"normalized_window": result.model_dump()}
 
 
@@ -78,11 +92,13 @@ async def normalize_input(state: SlotSearchState) -> dict:
 
 async def query_freebusy(state: SlotSearchState) -> dict:
     window = state["normalized_window"]
+    trace.node_enter("query_freebusy", inputs={"date_start": window["date_start"], "date_end": window["date_end"]})
     busy = await calendar.query_freebusy(
         window["date_start"],
         window["date_end"],
         settings.user_timezone,
     )
+    trace.node_exit("query_freebusy", outputs={"busy_periods": len(busy)})
     return {"busy_periods": busy}
 
 
@@ -91,10 +107,18 @@ async def query_freebusy(state: SlotSearchState) -> dict:
 # ---------------------------------------------------------------------------
 
 async def compute_free_slots(state: SlotSearchState) -> dict:
+    trace.node_enter("compute_free_slots", inputs={
+        "busy_periods": len(state["busy_periods"]),
+        "duration_minutes": state["duration_minutes"],
+    })
     slots = await calendar.compute_free_slots(
         state["normalized_window"],
         state["busy_periods"],
         state["duration_minutes"],
+    )
+    trace.node_exit("compute_free_slots",
+        outputs={"slots_found": len(slots), "search_succeeded": len(slots) > 0},
+        delta={"available_slots": len(slots), "search_succeeded": len(slots) > 0}
     )
     return {"available_slots": slots, "search_succeeded": len(slots) > 0}
 
@@ -103,7 +127,9 @@ async def compute_free_slots(state: SlotSearchState) -> dict:
 # Node: format_response
 # ---------------------------------------------------------------------------
 
+@track_latency
 async def format_response(state: SlotSearchState) -> dict:
+    log = logger.bind(module="slot_search")
     llm = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         temperature=0.3,
@@ -112,11 +138,13 @@ async def format_response(state: SlotSearchState) -> dict:
 
     if state["search_succeeded"]:
         display_times = ", ".join(s["display"] for s in state["available_slots"])
+        trace.node_enter("format_response", inputs={"available_slots": display_times})
         user_message = (
             f"Available {state['duration_minutes']}-minute slots: {display_times}. "
             f"Write one concise, friendly sentence listing these options for the user to choose from."
         )
     else:
+        trace.node_enter("format_response", inputs={"available_slots": "none"})
         user_message = (
             f"No {state['duration_minutes']}-minute slots were found in the requested window. "
             f"Write one concise, friendly sentence telling the user the window is fully booked "
@@ -124,4 +152,5 @@ async def format_response(state: SlotSearchState) -> dict:
         )
 
     response = await llm.ainvoke([HumanMessage(content=user_message)])
+    trace.node_exit("format_response", outputs={"natural_language_result": response.content.strip()})
     return {"natural_language_result": response.content.strip()}

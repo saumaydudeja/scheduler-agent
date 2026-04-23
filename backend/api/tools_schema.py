@@ -5,8 +5,7 @@ TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "raw_expression": { "type": "string", "description": "The original time expression from user" },
-                "duration_hint": { "type": "integer", "description": "Meeting duration in minutes if known" },
+                "raw_expression": { "type": "string", "description": "The original time expression from user natively including intended duration." },
                 "additional_constraints": { "type": "string", "description": "Any extra constraints mentioned" },
                 "thread_id": { "type": "string" }
             },
@@ -28,15 +27,14 @@ TOOLS = [
     },
     {
         "name": "invoke_conflict_resolution",
-        "description": "M3 (CONFLICT RESOLUTION MODULE). Call this exactly once if M2 informs you that the requested slot is fully booked. M3 takes over and automatically executes a Retry Ladder against the calendar to isolate the best alternative pivot before bothering the user.",
+        "description": "M3 (CONFLICT RESOLUTION MODULE). Call this exactly once if M2 informs you that the requested time is not available OR whenever you FIRST detect a conflict or pivot in the user's request. M3 takes over and automatically executes a Retry Ladder against the calendar to find out the resolution or ask the user for more information. THIS MODULE IS NEVER TO BE CALLED TWICE IN A THREAD, IT IS TO BE CALLED ONCE AND THEN BE RESUMED BY resume_conflict_resolution WITH THE SAME THREAD ID.",
         "parameters": {
             "type": "object",
             "properties": {
-                "situation_summary": { "type": "string", "description": "Comprehensive NL summary: what the user wants, what time window failed, any constraints. E.g. 'User wants a 1-hour meeting Tuesday afternoon. Tuesday 1 PM–5 PM was fully booked.'" },
-                "duration_minutes": { "type": "integer" },
+                "situation_summary": { "type": "string", "description": "Comprehensive NL summary: what the user wants, what time failed, constraints, and meeting duration natively injected. E.g. 'User wants a 1-hour meeting Tuesday afternoon. Tuesday 1 PM–5 PM was fully booked.'" },
                 "thread_id": { "type": "string" }
             },
-            "required": ["situation_summary", "duration_minutes", "thread_id"]
+            "required": ["situation_summary", "thread_id"]
         }
     },
     {

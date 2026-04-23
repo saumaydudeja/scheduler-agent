@@ -7,8 +7,7 @@ from typing import Optional, TypedDict
 
 class TimeResolutionState(TypedDict):
     # Inputs
-    raw_expression: str               # "after my Project Alpha meeting next week"
-    duration_hint: Optional[int]      # minutes, if known (may be None)
+    raw_expression: str               # "after my Project Alpha meeting next week. 30 minutes"
     additional_constraints: str       # "not too early" / "" if none
     user_preferences: dict            # from memory: usual durations, preferred times
 

@@ -12,8 +12,12 @@ from zoneinfo import ZoneInfo
 from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import structlog
+from utils.telemetry import track_latency
 
 from config import settings
+
+logger = structlog.get_logger()
 
 SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
@@ -67,6 +71,7 @@ def _build_service():
 # Freebusy query
 # ---------------------------------------------------------------------------
 
+@track_latency
 async def query_freebusy(date_start: str, date_end: str, timezone: str) -> list[dict]:
     """
     Query the Calendar Freebusy API for the primary calendar.
@@ -215,10 +220,17 @@ def _format_slot(start: datetime, end: datetime) -> dict:
 # Event search
 # ---------------------------------------------------------------------------
 
+@track_latency
 async def get_event_by_title(query: str, search_days: int = 30) -> Optional[dict]:
     """
-    Fuzzy-search the primary calendar for an event matching query.
-    Searches backwards and forwards historically up to search_days.
+    Find the best-matching event for a user's natural language reference.
+
+    Strategy:
+      - Pass 1: Broad fetch of all upcoming events in the window (no `q=` filter).
+        The `q=` API param does exact substring matching — useless for semantic
+        queries like "movie show" when the event is titled "PVR Avengers".
+      - Pass 2: Local fuzzy ranking with difflib on event titles + descriptions.
+        Picks the event with the highest similarity score above a threshold.
 
     Returns:
         {title, start_iso, end_iso, location} for the best match, or None.
@@ -226,63 +238,92 @@ async def get_event_by_title(query: str, search_days: int = 30) -> Optional[dict
     loop = asyncio.get_event_loop()
 
     def _search():
+        import difflib
+
         service = _build_service()
         now = datetime.now(dt_timezone.utc)
         time_min = now
         time_max = now + timedelta(days=search_days)
 
-        print(f"[CALENDAR ENGINE] Executing API Search for Query: '{query}'")
+        logger.info("calendar_api_search_started", query=query)
 
         try:
             result = (
                 service.events()
                 .list(
                     calendarId="primary",
-                    q=query,
                     timeMin=time_min.isoformat(),
                     timeMax=time_max.isoformat(),
                     singleEvents=True,
                     orderBy="startTime",
-                    maxResults=10,
+                    maxResults=50,
                 )
                 .execute()
             )
         except Exception as e:
-            print(f"[CALENDAR ENGINE] API Error: {e}")
+            logger.error("calendar_api_error", error=str(e))
             return None
 
         items = result.get("items", [])
-        
-        # LOG INJECTION FOR USER VISIBILITY
-        print(f"[CALENDAR ENGINE] Google API returned {len(items)} raw matches.")
-        for idx, i in enumerate(items):
-            print(f"  -> Match {idx+1}: {i.get('summary', 'No Title')} (Starts: {i.get('start', {}).get('dateTime', 'All-day')})")
+        logger.info("calendar_api_matches", count=len(items))
 
         if not items:
             return None
 
-        # Relaxed matching: The API already natively filters using `q=`.
-        # Just grab the very first valid event that has a physical start time mapped.
-        matched = None
-        for e in items:
-            if "start" in e and ("dateTime" in e["start"] or "date" in e["start"]):
-                matched = e
-                break
+        # --- Pass 2: local fuzzy matching ---
+        query_lower = query.lower()
+        query_words = set(query_lower.split())
 
-        if matched is None:
-            print("[CALENDAR ENGINE] No valid start bounds found in any matches.")
+        best_event = None
+        best_score = 0.0
+
+        for event in items:
+            title = event.get("summary", "")
+            description = event.get("description", "")
+            candidate = f"{title} {description}".lower()
+
+            # Sequence similarity on full candidate string
+            seq_score = difflib.SequenceMatcher(None, query_lower, candidate).ratio()
+
+            # Bonus: word overlap — helps when query words appear scattered in title
+            candidate_words = set(candidate.split())
+            overlap = len(query_words & candidate_words)
+            word_score = overlap / max(len(query_words), 1)
+
+            combined = 0.6 * seq_score + 0.4 * word_score
+
+            logger.info(
+                "calendar_fuzzy_score",
+                title=title,
+                seq_score=round(seq_score, 3),
+                word_score=round(word_score, 3),
+                combined=round(combined, 3),
+            )
+
+            if combined > best_score:
+                best_score = combined
+                best_event = event
+
+        # Minimum threshold to avoid false positives
+        MATCH_THRESHOLD = 0.2
+        if best_score < MATCH_THRESHOLD or best_event is None:
+            logger.info("calendar_no_match", best_score=round(best_score, 3), threshold=MATCH_THRESHOLD)
             return None
 
-        start = matched["start"].get("dateTime", matched["start"].get("date"))
-        end = matched["end"].get("dateTime", matched["end"].get("date"))
-        
-        print(f"[CALENDAR ENGINE] Selected mapping: {matched.get('summary')} @ {start}")
-        
+        logger.info(
+            "calendar_best_match",
+            title=best_event.get("summary"),
+            score=round(best_score, 3),
+        )
+
+        start = best_event["start"].get("dateTime", best_event["start"].get("date"))
+        end = best_event["end"].get("dateTime", best_event["end"].get("date"))
+
         return {
-            "title": matched.get("summary", ""),
+            "title": best_event.get("summary", ""),
             "start_iso": start,
             "end_iso": end,
-            "location": matched.get("location", ""),
+            "location": best_event.get("location", ""),
         }
 
     return await loop.run_in_executor(None, _search)
@@ -292,6 +333,8 @@ async def get_event_by_title(query: str, search_days: int = 30) -> Optional[dict
 # Event creation
 # ---------------------------------------------------------------------------
 
+
+@track_latency
 async def create_event(
     title: str,
     start_iso: str,

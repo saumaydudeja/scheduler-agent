@@ -10,6 +10,9 @@ from config import settings
 from api.tools_schema import TOOLS
 from api.dispatcher import execute_tool
 from api.sse import emit_status
+import structlog
+
+logger = structlog.get_logger()
 
 router = APIRouter()
 
@@ -44,7 +47,8 @@ P3-P4: CONFIRMATION PHASE: This is the final phase, wyou enter it when the user 
 - M3: CONFLICT RESOLUTION MODULE
 - Calendar booking module
 
-- **Data Model Paradigm**: NEVER attempt to fabricate structured JSON, raw ISO bounds, or schema layouts unless explicitly requested by a tool. Your interfaces (except `create_calendar_event`) strictly rely on Natural Language payload strings (e.g., passing `raw_slot_description` as "tomorrow afternoon for 30 minutes").
+- **Data Model Paradigm**: NEVER attempt to fabricate structured JSON, raw ISO bounds, or schema layouts unless explicitly requested by a tool. Your interfaces (except `create_calendar_event`) strictly rely on Natural Language payload strings.
+- **Duration Enforcing**: FOR M1 AND M3 TOOLS, YOU MUST INJECT THE REQUESTED MEETING DURATION AS TEXT NATURALLY INSIDE THE `raw_expression` OR `situation_summary` STRINGS (eg: "...for 30 minutes"). DO NOT OMIT THE DURATION.
 - **Entry Point 1 - Inline Routing (M2)**: If the user provides trivial date representations ("next Tuesday", "this coming Friday morning"), act as a pure passthrough. Try to resolve the relative time into a time slot if possible. Instantly invoke `search_slots` safely bypassing M1 resolutions. M2 natively handles NLP normalization and intersection bounding.
 - **Entry Point 2 - Complex State Resolution (M1)**: If the user references contextual state ("after my standup", "our usual sync up", "deadline of Q1"), delegate precisely to M1 using `resolve_time_expression`. M1 independently executes calendar introspection and LLM memory mapping to compute exact boundaries, emitting a semantic string for you to relay into `search_slots`.
 - **Entry Point 3 - Conflict Retry Ladder (M3)**: If M2's `search_slots` returns purely empty (`search_succeeded: false`), immediately hand off state execution to M3 by calling `invoke_conflict_resolution` with heavily enriched context. M3 owns the traversal algorithm to bounce against Google Calendar availability automatically based on heuristic constraints. 
@@ -91,6 +95,7 @@ async def _setup_session(gemini_ws):
 
 @router.websocket("/ws/voice")
 async def voice_websocket(websocket: WebSocket, session_id: str):
+    log = logger.bind(session_id=session_id)
     await websocket.accept()
     await emit_status(session_id, "Connecting to voice server...", "proxy", "setup")
     
@@ -103,28 +108,33 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
             
             await emit_status(session_id, "Connected and listening.", "proxy", "ready")
             
+            # Synchronization flag to prevent Gemini 1008 policy violation crash
+            is_tool_executing = False
+            
             async def browser_to_gemini():
+                nonlocal is_tool_executing
                 try:
                     while True:
                         # Receive universal frames from browser
                         message = await websocket.receive()
                         
                         if "bytes" in message and message["bytes"]:
-                            # Gemini realtime streaming uses realtimeInput chunks
-                            realtime_msg = {
-                                "realtimeInput": {
-                                    "mediaChunks": [{
-                                        "mimeType": "audio/pcm;rate=16000",
-                                        "data": base64.b64encode(message["bytes"]).decode("utf-8")
-                                    }]
+                            # Gate audio streams while a tool is executing to prevent server drops
+                            if not is_tool_executing:
+                                realtime_msg = {
+                                    "realtimeInput": {
+                                        "mediaChunks": [{
+                                            "mimeType": "audio/pcm;rate=16000",
+                                            "data": base64.b64encode(message["bytes"]).decode("utf-8")
+                                        }]
+                                    }
                                 }
-                            }
-                            await gemini_ws.send(json.dumps(realtime_msg))
+                                await gemini_ws.send(json.dumps(realtime_msg))
                             
                         elif "text" in message and message["text"]:
                             try:
                                 cmd = json.loads(message["text"])
-                                if cmd.get("type") == "mic_muted":
+                                if cmd.get("type") == "mic_muted" and not is_tool_executing:
                                     # Explicit end-of-user-speech signal natively severing VAD latency
                                     turn_complete_msg = {
                                         "realtimeInput": {
@@ -137,9 +147,10 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
                 except WebSocketDisconnect:
                     pass
                 except Exception as e:
-                    print(f"Browser to Gemini Error: {e}")
+                    log.error("browser_to_gemini_error", error=str(e))
 
             async def gemini_to_browser():
+                nonlocal is_tool_executing
                 try:
                     while True:
                         msg_str = await gemini_ws.recv()
@@ -162,38 +173,43 @@ async def voice_websocket(websocket: WebSocket, session_id: str):
                         # 2. Handle ToolCalls from Agent
                         tool_call_list = msg.get("toolCall", {}).get("functionCalls", [])
                         if tool_call_list:
-                            function_responses = []
-                            for tool_call in tool_call_list:
-                                tool_name = tool_call["name"]
-                                tool_args = tool_call.get("args", {})
-                                tool_id = tool_call["id"]
-                                
-                                result = await execute_tool(tool_name, tool_args, session_id)
-                                
-                                function_responses.append({
-                                    "id": tool_id,
-                                    "name": tool_name,
-                                    "response": result
-                                })
-                                
-                            # Return results matching original calls
-                            tool_response_msg = {
-                                "toolResponse": {
-                                    "functionResponses": function_responses
+                            # Lock the audio sender explicitly before processing function invocations
+                            is_tool_executing = True
+                            try:
+                                function_responses = []
+                                for tool_call in tool_call_list:
+                                    tool_name = tool_call["name"]
+                                    tool_args = tool_call.get("args", {})
+                                    tool_id = tool_call["id"]
+                                    
+                                    result = await execute_tool(tool_name, tool_args, session_id)
+                                    
+                                    function_responses.append({
+                                        "id": tool_id,
+                                        "name": tool_name,
+                                        "response": result
+                                    })
+                                    
+                                # Return results matching original calls
+                                tool_response_msg = {
+                                    "toolResponse": {
+                                        "functionResponses": function_responses
+                                    }
                                 }
-                            }
-                            await gemini_ws.send(json.dumps(tool_response_msg))
+                                await gemini_ws.send(json.dumps(tool_response_msg))
+                            finally:
+                                is_tool_executing = False
                             
                 except websockets.exceptions.ConnectionClosed:
                     pass
                 except Exception as e:
-                    print(f"Gemini to Browser Error: {e}")
+                    log.error("gemini_to_browser_error", error=str(e))
 
             # Run loops side-by-side
             await asyncio.gather(browser_to_gemini(), gemini_to_browser())
 
     except Exception as e:
-        print(f"WebSocket session error: {e}")
+        log.error("websocket_session_error", error=str(e))
         try:
             await websocket.close()
         except Exception:

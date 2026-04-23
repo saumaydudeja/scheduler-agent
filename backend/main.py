@@ -4,6 +4,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from utils.logger import setup_logging
+import utils.trace as trace
+setup_logging()
+
 # Per-session SSE queues: session_id -> asyncio.Queue
 # Populated when a session connects; drained by the SSE endpoint.
 sse_queues: dict[str, asyncio.Queue] = {}
@@ -11,6 +15,7 @@ sse_queues: dict[str, asyncio.Queue] = {}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    trace.start_trace_writer()
     yield
     sse_queues.clear()
 
